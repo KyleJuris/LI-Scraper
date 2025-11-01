@@ -6,9 +6,9 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
 const navigation = [
-  { name: "Generate Lists", href: "/lists", icon: List },
+  { name: "Lists", href: "/lists", icon: List },
   { name: "Campaigns", href: "/campaigns", icon: Megaphone },
-  { name: "Profiles", href: "/profiles", icon: User },
+  { name: "Sender Profiles", href: "/profiles", icon: User },
 ]
 
 export function AppSidebar() {

@@ -32,20 +32,22 @@ export default function CampaignsPage() {
 
   const handleCreateCampaign = async (campaignData: {
     name: string
-    listId: string
+    listIds: string[]
     profileId: string
     message: string
   }) => {
     setIsLoading(true)
     try {
       const result = await api.sendCampaign({
-        limit: 20,
+        limit: 1000, // Large limit to send to all selected prospects
         default_dm: campaignData.message,
+        list_ids: campaignData.listIds,
+        sender_id: campaignData.profileId,
       })
       const newCampaign = {
         id: campaigns.length + 1,
         name: campaignData.name,
-        list_name: "Selected List",
+        list_name: campaignData.listIds.length === 1 ? "1 list" : `${campaignData.listIds.length} lists`,
         message: campaignData.message,
         status: "running",
       }

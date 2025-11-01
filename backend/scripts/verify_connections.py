@@ -80,6 +80,14 @@ def fetch_invited_for_sender(sender_id: str, limit: int = 50) -> List[Dict[str, 
     r.raise_for_status()
     return r.json()
 
+def get_verify_limit() -> int:
+    """Get the verification limit from environment variable, default to 50."""
+    try:
+        limit_str = os.getenv("VERIFY_LIMIT", "50")
+        return int(limit_str)
+    except (ValueError, TypeError):
+        return 50
+
 def mark_connected(profile_url: str) -> None:
     url = f"{sb_url(PROSPECTS_TABLE)}?profile_url=eq.{profile_url}"
     payload = {"status": "connected", "connected_at": now_iso(), "last_checked": now_iso(), "last_error": None}
@@ -101,6 +109,7 @@ def _verify_login(ctx) -> bool:
     return ok
 
 def run() -> None:
+    limit = get_verify_limit()
     senders = load_senders()
     with sync_playwright() as p:
         for s in senders:
@@ -108,7 +117,7 @@ def run() -> None:
             state = s.get("storage_state") or {}
             ua = s.get("user_agent")
 
-            rows = fetch_invited_for_sender(sid, limit=50)
+            rows = fetch_invited_for_sender(sid, limit=limit)
             print(f"\n[Sender: {s.get('name','(no name)')}] Invited rows to verify: {len(rows)}")
             if not rows:
                 continue

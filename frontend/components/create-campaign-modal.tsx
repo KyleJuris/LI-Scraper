@@ -16,18 +16,20 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { api } from "@/lib/api"
 
 interface CreateCampaignModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (data: { name: string; listId: string; profileId: string; message: string }) => void
+  onSubmit: (data: { name: string; listIds: string[]; profileId: string; message: string }) => void
   disabled?: boolean
 }
 
 export function CreateCampaignModal({ open, onOpenChange, onSubmit, disabled }: CreateCampaignModalProps) {
   const [name, setName] = useState("")
-  const [listId, setListId] = useState("")
+  const [listIds, setListIds] = useState<string[]>([])
   const [profileId, setProfileId] = useState("")
   const [message, setMessage] = useState("")
   const [lists, setLists] = useState<any[]>([])
@@ -41,7 +43,7 @@ export function CreateCampaignModal({ open, onOpenChange, onSubmit, disabled }: 
     } else {
       // Reset form when modal closes
       setName("")
-      setListId("")
+      setListIds([])
       setProfileId("")
       setMessage("")
     }
@@ -67,13 +69,23 @@ export function CreateCampaignModal({ open, onOpenChange, onSubmit, disabled }: 
     }
   }
 
+  const handleToggleList = (listId: string) => {
+    setListIds((prev) => {
+      if (prev.includes(listId)) {
+        return prev.filter((id) => id !== listId)
+      } else {
+        return [...prev, listId]
+      }
+    })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (name && listId && profileId && message) {
-      onSubmit({ name, listId, profileId, message })
+    if (name && listIds.length > 0 && profileId && message) {
+      onSubmit({ name, listIds, profileId, message })
       // Reset form
       setName("")
-      setListId("")
+      setListIds([])
       setProfileId("")
       setMessage("")
     }
@@ -86,7 +98,7 @@ export function CreateCampaignModal({ open, onOpenChange, onSubmit, disabled }: 
           <DialogHeader>
             <DialogTitle>Create New Campaign</DialogTitle>
             <DialogDescription>
-              Set up a new LinkedIn outreach campaign. Select a sender profile, list, and customize your message
+              Set up a new LinkedIn outreach campaign. Select a sender profile, one or more lists, and customize your message
               template.
             </DialogDescription>
           </DialogHeader>
@@ -123,25 +135,39 @@ export function CreateCampaignModal({ open, onOpenChange, onSubmit, disabled }: 
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="list">Select List</Label>
-              <Select value={listId} onValueChange={setListId} required disabled={isLoadingData || lists.length === 0}>
-                <SelectTrigger id="list">
-                  <SelectValue placeholder={isLoadingData ? "Loading..." : lists.length === 0 ? "No lists available" : "Choose a list"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {isLoadingData ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading...</div>
-                  ) : lists.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">No lists available</div>
-                  ) : (
-                    lists.map((list) => (
-                      <SelectItem key={list.id} value={list.id.toString()}>
-                        {list.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="list">Select Lists</Label>
+              {isLoadingData ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">Loading...</div>
+              ) : lists.length === 0 ? (
+                <div className="px-2 py-1.5 text-sm text-muted-foreground">No lists available</div>
+              ) : (
+                <ScrollArea className="h-[200px] rounded-md border p-4">
+                  <div className="grid gap-3">
+                    {lists.map((list) => {
+                      const listIdStr = list.id.toString()
+                      const isChecked = listIds.includes(listIdStr)
+                      return (
+                        <div key={list.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`list-${list.id}`}
+                            checked={isChecked}
+                            onCheckedChange={() => handleToggleList(listIdStr)}
+                          />
+                          <label
+                            htmlFor={`list-${list.id}`}
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                          >
+                            {list.name}
+                          </label>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </ScrollArea>
+              )}
+              {listIds.length > 0 && (
+                <p className="text-xs text-muted-foreground">{listIds.length} list{listIds.length !== 1 ? "s" : ""} selected</p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="message">Message Template</Label>

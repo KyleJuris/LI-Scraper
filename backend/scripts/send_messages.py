@@ -16,6 +16,12 @@ SETTINGS_TABLE = os.getenv("SUPABASE_SETTINGS_TABLE", "li_settings")
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 SENDER_IDS_ENV = os.getenv("SENDER_IDS", "")
 
+# Campaign-specific environment variables
+CAMPAIGN_DM = os.getenv("CAMPAIGN_DM", "")
+CAMPAIGN_LIST_IDS = os.getenv("CAMPAIGN_LIST_IDS", "")
+CAMPAIGN_SENDER_ID = os.getenv("CAMPAIGN_SENDER_ID", "")
+CAMPAIGN_LIMIT = os.getenv("CAMPAIGN_LIMIT", "")
+
 assert SUPABASE_URL and SUPABASE_KEY, "Missing SUPABASE_URL or SUPABASE_ANON_KEY"
 
 SB_HEADERS = {
@@ -56,6 +62,18 @@ def now_iso() -> str:
 def sb_url(table: str) -> str:
     return f"{SUPABASE_URL}/rest/v1/{table}"
 
+# Override DEFAULT_DM if campaign message is provided (after sb_url is defined)
+if CAMPAIGN_DM:
+    DEFAULT_DM = CAMPAIGN_DM
+    # Update database setting temporarily
+    url = f"{sb_url(SETTINGS_TABLE)}"
+    payload = {"key": "DEFAULT_DM", "value": CAMPAIGN_DM}
+    headers = {**SB_HEADERS, "Prefer": "resolution=merge-duplicates"}
+    try:
+        requests.post(url, headers=headers, json=payload, timeout=5)
+    except Exception:
+        pass
+
 def load_senders() -> List[Dict[str, Any]]:
     q = f"{sb_url(SENDERS_TABLE)}?enabled=eq.true&select=id,name,user_agent,storage_state"
     if SENDER_IDS_ENV.strip():
@@ -77,8 +95,21 @@ def load_senders() -> List[Dict[str, Any]]:
         raise RuntimeError("No enabled senders found.")
     return arr
 
-def fetch_connected_for_sender(sender_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-    url = f"{sb_url(PROSPECTS_TABLE)}?status=eq.connected&assigned_sender=eq.{sender_id}&select=profile_url,first_name,dm_text&limit={limit}"
+def fetch_connected_for_sender(sender_id: str, limit: int = 50, list_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """
+    Fetch connected prospects for a sender, optionally filtered by list IDs.
+    """
+    # Build the base query
+    filters = [f"status=eq.connected", f"assigned_sender=eq.{sender_id}"]
+    
+    # Add list_id filter if provided
+    if list_ids and len(list_ids) > 0:
+        # Use PostgreSQL's `in` operator: list_id=in.(id1,id2,id3)
+        list_id_filter = ",".join(list_ids)
+        filters.append(f"list_id=in.({list_id_filter})")
+    
+    query_string = "&".join(filters)
+    url = f"{sb_url(PROSPECTS_TABLE)}?{query_string}&select=profile_url,first_name,dm_text,list_id&limit={limit}&order=created_at.desc"
     r = requests.get(url, headers=SB_HEADERS)
     r.raise_for_status()
     return r.json()
@@ -160,13 +191,34 @@ def _verify_login(ctx) -> bool:
 
 def run() -> None:
     senders = load_senders()
+    
+    # Filter by sender_id if campaign specifies it
+    if CAMPAIGN_SENDER_ID:
+        senders = [s for s in senders if s.get("id") == CAMPAIGN_SENDER_ID]
+        if not senders:
+            print(f"[ERROR] Sender {CAMPAIGN_SENDER_ID} not found or not enabled")
+            return
+    
+    # Parse list_ids if provided
+    list_ids = None
+    if CAMPAIGN_LIST_IDS:
+        list_ids = [lid.strip() for lid in CAMPAIGN_LIST_IDS.split(",") if lid.strip()]
+    
+    # Get limit
+    limit = 50
+    if CAMPAIGN_LIMIT:
+        try:
+            limit = int(CAMPAIGN_LIMIT)
+        except ValueError:
+            pass
+    
     with sync_playwright() as p:
         for s in senders:
             sid = s["id"]
             state = s.get("storage_state") or {}
             ua = s.get("user_agent")
 
-            rows = fetch_connected_for_sender(sid, limit=50)
+            rows = fetch_connected_for_sender(sid, limit=limit, list_ids=list_ids)
             print(f"\n[Sender: {s.get('name','(no name)')}] Connected rows to message: {len(rows)}")
             if not rows:
                 continue

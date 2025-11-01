@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
 import Link from "next/link"
-import { Plus, Eye, Pencil, Trash2 } from "lucide-react"
+import { Plus, Eye, Pencil, Trash2, CheckCircle2 } from "lucide-react"
 import { api } from "@/lib/api"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -42,6 +42,8 @@ export default function ListsPage() {
   const [sendNote, setSendNote] = useState(false)
   const [noteText, setNoteText] = useState("")
   const [enabledSendersCount, setEnabledSendersCount] = useState(0)
+  const [profileStats, setProfileStats] = useState<Record<string, { invited: number; connected: number; total: number }>>({})
+  const [isVerifying, setIsVerifying] = useState(false)
   
   // Rename dialog state
   const [renameDialogOpen, setRenameDialogOpen] = useState(false)
@@ -91,48 +93,130 @@ export default function ListsPage() {
     return false
   }
 
+  // Ref to track polling interval
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const processingListIdsRef = useRef<Set<string>>(new Set())
+
   // Poll for list updates when there are processing lists
   useEffect(() => {
-    const processingListIds = lists.filter((list) => isListProcessing(list)).map((l) => l.id)
+    // Check if there are any processing lists
+    const processingLists = lists.filter((list) => isListProcessing(list))
+    const currentProcessingIds = new Set(processingLists.map((l) => l.id))
     
-    if (processingListIds.length === 0) {
-      return // No processing lists, no need to poll
+    // Only restart polling if the set of processing list IDs has changed
+    const idsChanged = 
+      currentProcessingIds.size !== processingListIdsRef.current.size ||
+      Array.from(currentProcessingIds).some(id => !processingListIdsRef.current.has(id))
+    
+    if (currentProcessingIds.size === 0) {
+      // No processing lists - stop polling if active
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
+      processingListIdsRef.current.clear()
+      return
     }
 
-    let isPolling = true
-    const pollInterval = setInterval(async () => {
-      if (!isPolling) return
-      
-      try {
-        const updatedLists = await api.getLists()
-        // Check if any of our processing lists are still processing
-        const stillProcessing = updatedLists.some((list: any) => 
-          processingListIds.includes(list.id) && isListProcessing(list)
-        )
-        
-        // Only update lists when processing completes (profile_count > 0 or time elapsed)
-        if (!stillProcessing) {
-          console.log("[FRONTEND] List processing completed, refreshing lists")
-          setLists(updatedLists)
-          isPolling = false // Stop polling when done
-        }
-        // Don't update during processing - just keep showing "Processing"
-      } catch (error) {
-        console.error("Error polling lists:", error)
+    // Only restart polling if processing list IDs changed
+    if (idsChanged) {
+      // Clear existing interval
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
       }
-    }, 5000) // Poll every 5 seconds (reduced frequency)
+      
+      // Update tracked IDs
+      processingListIdsRef.current = currentProcessingIds
+
+      const poll = async () => {
+        try {
+          const updatedLists = await api.getLists()
+          // Check if any of our processing lists are still processing
+          const stillProcessing = updatedLists.some((list: any) => 
+            processingListIdsRef.current.has(list.id) && isListProcessing(list)
+          )
+          
+          // If no longer processing, update and stop polling
+          if (!stillProcessing) {
+            console.log("[FRONTEND] List processing completed, refreshing lists")
+            setLists(updatedLists)
+            
+            // Refresh profile stats for completed lists
+            const stats: Record<string, { invited: number; connected: number; total: number }> = {}
+            await Promise.all(
+              updatedLists.map(async (list: any) => {
+                if (list.id && !isListProcessing(list)) {
+                  try {
+                    const prospects = await api.getListProspects(list.id)
+                    const invited = prospects.filter((p: any) => p.status === "invited").length
+                    const connected = prospects.filter((p: any) => p.status === "connected").length
+                    const total = prospects.length
+                    stats[list.id] = { invited, connected, total }
+                  } catch (error) {
+                    console.error(`Error fetching prospects for list ${list.id}:`, error)
+                    stats[list.id] = { invited: 0, connected: 0, total: 0 }
+                  }
+                }
+              })
+            )
+            setProfileStats((prev) => ({ ...prev, ...stats }))
+            
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current)
+              pollIntervalRef.current = null
+            }
+            processingListIdsRef.current.clear()
+            return
+          }
+          // Don't update during processing - just keep showing "Processing"
+        } catch (error) {
+          console.error("Error polling lists:", error)
+        }
+      }
+
+      // Start polling every 10 seconds (less frequent)
+      pollIntervalRef.current = setInterval(poll, 10000)
+      
+      // Also poll immediately to check current status
+      poll()
+    }
 
     return () => {
-      isPolling = false
-      clearInterval(pollInterval)
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current)
+        pollIntervalRef.current = null
+      }
     }
-  }, [lists.length]) // Only re-run when number of lists changes, not on every update
+  }, [lists.map(l => `${l.id}-${l.profile_count}-${l.created_at}`).join(',')]) // Only re-run when list state actually changes
 
   const fetchLists = async () => {
     setIsLoadingLists(true)
     try {
       const listsData = await api.getLists()
       setLists(listsData)
+      
+      // Fetch prospects for all lists to calculate stats
+      const stats: Record<string, { invited: number; connected: number; total: number }> = {}
+      
+      await Promise.all(
+        listsData.map(async (list: any) => {
+          if (list.id && !isListProcessing(list)) {
+            try {
+              const prospects = await api.getListProspects(list.id)
+              const invited = prospects.filter((p: any) => p.status === "invited").length
+              const connected = prospects.filter((p: any) => p.status === "connected").length
+              const total = prospects.length
+              stats[list.id] = { invited, connected, total }
+            } catch (error) {
+              console.error(`Error fetching prospects for list ${list.id}:`, error)
+              stats[list.id] = { invited: 0, connected: 0, total: 0 }
+            }
+          }
+        })
+      )
+      
+      setProfileStats(stats)
     } catch (error) {
       toast({
         title: "Error",
@@ -277,31 +361,64 @@ export default function ListsPage() {
     }
   }
 
+  const handleVerifyConnections = async () => {
+    setIsVerifying(true)
+    try {
+      const result = await api.verifyConnections({ limit: 50 })
+      toast({
+        title: "Success",
+        description: `Verified ${result.checked} connections. ${result.connected} new connections found.`,
+      })
+      // Refresh lists to update profile stats
+      await fetchLists()
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to verify connections",
+        variant: "destructive",
+      })
+    } finally {
+      setIsVerifying(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Generate Lists</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Lists</h1>
           <p className="text-muted-foreground mt-2">Manage your LinkedIn prospect lists for outreach campaigns</p>
         </div>
-        <Button 
-          onClick={() => setIsModalOpen(true)} 
-          className="gap-2 shadow-sm"
-          disabled={enabledSendersCount === 0}
-          title={enabledSendersCount === 0 ? "No enabled senders available. Please enable at least one sender profile." : ""}
-        >
-          {enabledSendersCount === 0 ? (
-            <>
-              <Plus className="h-4 w-4" />
-              No Enabled Sender
-            </>
-          ) : (
-            <>
-              <Plus className="h-4 w-4" />
-              Generate New List
-            </>
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={handleVerifyConnections} 
+            variant="outline"
+            className="gap-2 shadow-sm"
+            disabled={isVerifying || enabledSendersCount === 0}
+            title={enabledSendersCount === 0 ? "No enabled senders available. Please enable at least one sender profile." : "Verify connection status for invited prospects"}
+          >
+            <CheckCircle2 className="h-4 w-4" />
+            {isVerifying ? "Verifying..." : "Verify Connections"}
+          </Button>
+          <Button 
+            onClick={() => setIsModalOpen(true)} 
+            className="gap-2 shadow-sm"
+            disabled={enabledSendersCount === 0}
+            title={enabledSendersCount === 0 ? "No enabled senders available. Please enable at least one sender profile." : ""}
+          >
+            {enabledSendersCount === 0 ? (
+              <>
+                <Plus className="h-4 w-4" />
+                No Enabled Sender
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4" />
+                Generate New List
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
@@ -415,7 +532,23 @@ export default function ListsPage() {
                           Processing
                         </Badge>
                       ) : (
-                        <Badge variant="secondary">{list.count || list.profile_count || 0} profiles</Badge>
+                        (() => {
+                          const stats = profileStats[list.id]
+                          if (!stats || stats.total === 0) {
+                            return <Badge variant="secondary">{list.count || list.profile_count || 0} profiles</Badge>
+                          }
+                          return (
+                            <div className="flex flex-col gap-1">
+                              <div className="text-sm">
+                                <span className="text-muted-foreground">{stats.invited} invited</span>
+                                <span className="mx-1 text-muted-foreground">•</span>
+                                <span className="text-muted-foreground">{stats.connected} connected</span>
+                                <span className="mx-1 text-muted-foreground">•</span>
+                                <span className="font-medium">{stats.total} total</span>
+                              </div>
+                            </div>
+                          )
+                        })()
                       )}
                     </TableCell>
                     <TableCell className="text-muted-foreground">

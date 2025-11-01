@@ -80,6 +80,52 @@ NAME_H1 = "main h1"
 def jitter_sleep(a: float, b: float) -> None:
     time.sleep(random.uniform(a, b))
 
+def go_to_next_page(page) -> bool:
+    """
+    Navigate to the next page of LinkedIn search results.
+    Returns True if navigation was successful, False otherwise.
+    """
+    # Selectors matching the LinkedIn pagination button structure
+    next_button_selectors = [
+        "button.artdeco-pagination__button--next[aria-label='Next']",  # Most specific
+        "button.artdeco-pagination__button.artdeco-pagination__button--next[aria-label='Next']",  # Full class match
+        "button[aria-label='Next'].artdeco-pagination__button--next",  # Alternative order
+        ".artdeco-pagination__button--next[aria-label='Next']",  # Without button tag
+        "button.artdeco-pagination__button--next",  # Class only
+        "button[aria-label='Next']",  # Aria label only
+    ]
+    
+    for selector in next_button_selectors:
+        try:
+            button = page.locator(selector).first
+            if button.count() > 0:
+                # Check if button is disabled
+                is_disabled = button.get_attribute("disabled")
+                if is_disabled is not None:
+                    print(f"  [INFO] Next button found but is disabled")
+                    return False
+                
+                # Try to click the button
+                try:
+                    button.scroll_into_view_if_needed()
+                    button.wait_for(state="visible", timeout=3000)
+                    button.click()
+                    print(f"  [INFO] Clicked next page button using selector: {selector}")
+                    return True
+                except Exception as e:
+                    # Try JavaScript click as fallback
+                    try:
+                        page.evaluate("(el) => el.click()", button)
+                        print(f"  [INFO] Clicked next page button via JavaScript using selector: {selector}")
+                        return True
+                    except Exception:
+                        continue
+        except Exception as e:
+            continue
+    
+    print(f"  [WARN] Could not find or click next page button")
+    return False
+
 def normalize_profile_url(url: str) -> str:
     if "/in/" not in url:
         return url
@@ -391,10 +437,12 @@ def run() -> None:
             
             # Collect new links from current page
             new_links = []
+            all_links_on_page = 0
             try:
                 for a in collector.query_selector_all("a[data-test-app-aware-link][href*='/in/']"):
                     href = a.get_attribute("href")
                     if href and "/in/" in href:
+                        all_links_on_page += 1
                         normalized = normalize_profile_url(href)
                         # Skip if already seen in this session OR if already exists in database
                         if normalized not in seen_urls:
@@ -406,6 +454,16 @@ def run() -> None:
                                 seen_urls.add(normalized)  # Mark as seen to avoid re-checking
             except Exception as e:
                 print(f"[ERROR] Error collecting links: {e}")
+            
+            # If no new links found and we found profiles on the page, all were duplicates - go to next page
+            if not new_links and all_links_on_page > 0:
+                print(f"[INFO] All {all_links_on_page} profiles on this page are duplicates. Navigating to next page...")
+                if go_to_next_page(collector):
+                    scroll_attempts = 0  # Reset scroll attempts when moving to new page
+                    jitter_sleep(2.0, 3.0)
+                    continue
+                else:
+                    print("[WARN] Could not navigate to next page. Trying to scroll more...")
             
             # Process each new link immediately
             reached_limit = False

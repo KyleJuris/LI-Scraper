@@ -47,6 +47,8 @@ export interface PopulateListRequest {
 export interface SendCampaignRequest {
   limit?: number
   default_dm?: string
+  list_ids?: string[]
+  sender_id?: string
 }
 
 export interface VerifyConnectionsRequest {
