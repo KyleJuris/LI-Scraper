@@ -11,11 +11,10 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 PROSPECTS_TABLE = os.getenv("SUPABASE_TABLE", "li_prospects")
 SENDERS_TABLE = os.getenv("SUPABASE_SENDERS_TABLE", "li_senders")
+SETTINGS_TABLE = os.getenv("SUPABASE_SETTINGS_TABLE", "li_settings")
 
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 SENDER_IDS_ENV = os.getenv("SENDER_IDS", "")
-LOCALE = os.getenv("LOCALE", "en-US")
-TIMEZONE_ID = os.getenv("TIMEZONE_ID", "Asia/Dubai")
 
 assert SUPABASE_URL and SUPABASE_KEY, "Missing SUPABASE_URL or SUPABASE_ANON_KEY"
 
@@ -24,6 +23,24 @@ SB_HEADERS = {
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
 }
+
+# --------------------------- LOAD SETTINGS FROM DB ---------------------------
+def load_setting(key: str, default: str = "") -> str:
+    """Load a setting from the database, fallback to default if not found."""
+    url = f"{SUPABASE_URL}/rest/v1/{SETTINGS_TABLE}?key=eq.{key}&select=value"
+    try:
+        r = requests.get(url, headers=SB_HEADERS, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            if data and len(data) > 0:
+                return data[0].get("value", default)
+    except Exception as e:
+        print(f"[WARN] Failed to load setting '{key}' from DB: {e}")
+    return default
+
+# Load settings from database
+LOCALE = load_setting("LOCALE", "en-US")
+TIMEZONE_ID = load_setting("TIMEZONE_ID", "Asia/Dubai")
 
 MESSAGE_BTN_ROLE = re.compile(r"Message", re.I)
 
