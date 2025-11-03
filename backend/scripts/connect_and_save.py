@@ -257,7 +257,7 @@ def _verify_login(ctx) -> bool:
             stealth_sync(p)
         except Exception as e:
             print("[WARN] stealth_sync on _verify_login page failed:", e)
-    p.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=30000)
+    p.goto("https://www.linkedin.com/feed/", wait_until="load", timeout=60000)
     jitter_sleep(1.5, 2.5)
     ok = all(s not in p.url.lower() for s in ("login","challenge","uas/login"))
     p.close(); return ok

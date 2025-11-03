@@ -114,8 +114,8 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
       <Card className="shadow-sm">
         <CardHeader>
-          <CardTitle>Prospects</CardTitle>
-          <CardDescription>All LinkedIn prospects in this list</CardDescription>
+          <CardTitle>Profiles</CardTitle>
+          <CardDescription>All LinkedIn profiles in this list</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -124,19 +124,20 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 <TableHead>Name</TableHead>
                 <TableHead>Profile URL</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Invite Note</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoadingProfiles ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    Loading prospects...
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    Loading profiles...
                   </TableCell>
                 </TableRow>
               ) : profiles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center text-muted-foreground">
-                    No prospects found in this list
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No profiles found in this list
                   </TableCell>
                 </TableRow>
               ) : (
@@ -167,6 +168,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                       >
                         {profile.status || "new"}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {profile.note_text || "—"}
                     </TableCell>
                   </TableRow>
                 ))
