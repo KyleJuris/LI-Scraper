@@ -682,7 +682,7 @@ def lists_populate(
     """
     # Use print AND logger to ensure visibility
     print("\n" + "=" * 80)
-    print("🔥🔥🔥 ENDPOINT HIT: /lists/populate 🔥🔥🔥")
+    print("*** ENDPOINT HIT: /lists/populate ***")
     print("=" * 80)
     
     try:

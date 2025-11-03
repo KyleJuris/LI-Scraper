@@ -5,13 +5,25 @@ import requests
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+# Attempt to import stealth helper (several package layouts exist)
+STEALTH_AVAILABLE = False
+try:
+    from playwright_stealth import stealth_sync
+    STEALTH_AVAILABLE = True
+except Exception:
+    try:
+        from playwright_stealth.sync import stealth_sync
+        STEALTH_AVAILABLE = True
+    except Exception:
+        STEALTH_AVAILABLE = False
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 PROSPECTS_TABLE = os.getenv("SUPABASE_TABLE", "li_prospects")
 SENDERS_TABLE = os.getenv("SUPABASE_SENDERS_TABLE", "li_senders")
-SETTINGS_TABLE = os.getenv("SUPABASE_SETTINGS_TABLE", "li_settings")
+SETTINGS_TABLE = os.getenv("SETTINGS_TABLE", "li_settings")
 
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 SENDER_IDS_ENV = os.getenv("SENDER_IDS", "")
@@ -102,6 +114,11 @@ def touch_checked(profile_url: str) -> None:
 
 def _verify_login(ctx) -> bool:
     p = ctx.new_page()
+    if STEALTH_AVAILABLE:
+        try:
+            stealth_sync(p)
+        except Exception as e:
+            print("[WARN] stealth_sync failed on verify page:", e)
     p.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
     jitter_sleep(1.0, 1.5)
     ok = ("login" not in p.url.lower()) and ("challenge" not in p.url.lower())
@@ -141,6 +158,13 @@ def run() -> None:
             for i, row in enumerate(rows, start=1):
                 url = row["profile_url"]
                 page = ctx.new_page()
+                # apply stealth to each page if available
+                if STEALTH_AVAILABLE:
+                    try:
+                        stealth_sync(page)
+                    except Exception as e:
+                        print("[WARN] stealth_sync failed on new page:", e)
+
                 print(f"  [{i}/{len(rows)}] {url}")
                 try:
                     page.goto(url, wait_until="domcontentloaded")

@@ -6,6 +6,19 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
+# Attempt to import stealth helper (several package layouts exist)
+STEALTH_AVAILABLE = False
+try:
+    from playwright_stealth import stealth_sync
+    STEALTH_AVAILABLE = True
+except Exception:
+    try:
+        # some forks expose a sync submodule
+        from playwright_stealth.sync import stealth_sync
+        STEALTH_AVAILABLE = True
+    except Exception:
+        STEALTH_AVAILABLE = False
+
 # ------------------------------- ENV -------------------------------
 load_dotenv()
 
@@ -13,8 +26,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 PROSPECTS_TABLE = os.getenv("SUPABASE_TABLE", "li_prospects")
 SENDERS_TABLE = os.getenv("SUPABASE_SENDERS_TABLE", "li_senders")
-SETTINGS_TABLE = os.getenv("SUPABASE_SETTINGS_TABLE", "li_settings")
-LISTS_TABLE = os.getenv("SUPABASE_LISTS_TABLE", "li_lists")
+SETTINGS_TABLE = os.getenv("SETTINGS_TABLE", "li_settings") if os.getenv("SETTINGS_TABLE") else os.getenv("SETTINGS_TABLE", "li_settings")
+LISTS_TABLE = os.getenv("LISTS_TABLE", "li_lists") if os.getenv("LISTS_TABLE") else os.getenv("LISTS_TABLE", "li_lists")
+
+# Backwards compatibility with your original environment names
+if not SETTINGS_TABLE:
+    SETTINGS_TABLE = os.getenv("SETTINGS_TABLE", "li_settings")
+if not LISTS_TABLE:
+    LISTS_TABLE = os.getenv("LISTS_TABLE", "li_lists")
 
 HEADLESS = os.getenv("HEADLESS", "false").lower() == "true"
 SENDER_IDS_ENV = os.getenv("SENDER_IDS", "")
@@ -232,6 +251,12 @@ def update_list_count_immediately(list_id: str) -> None:
 
 def _verify_login(ctx) -> bool:
     p = ctx.new_page()
+    # apply stealth if available
+    if STEALTH_AVAILABLE:
+        try:
+            stealth_sync(p)
+        except Exception as e:
+            print("[WARN] stealth_sync on _verify_login page failed:", e)
     p.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=30000)
     jitter_sleep(1.5, 2.5)
     ok = all(s not in p.url.lower() for s in ("login","challenge","uas/login"))
@@ -409,11 +434,18 @@ def run() -> None:
             extra_http_headers={"Referer": "https://www.linkedin.com/feed/"},
         )
 
+        # collector page
+        collector = base.new_page()
+        if STEALTH_AVAILABLE:
+            try:
+                stealth_sync(collector)
+            except Exception as e:
+                print("[WARN] stealth_sync on collector page failed:", e)
+
         if not _verify_login(base):
             print("[ERROR] First sender not authenticated. Update storage_state.")
-            base.close(); browser.close(); return
+            collector.close(); base.close(); browser.close(); return
 
-        collector = base.new_page()
         seen_urls = set()  # Track URLs we've already seen in this session
         processed_count = 0  # Track how many profiles we've processed
         scroll_attempts = 0
@@ -487,6 +519,13 @@ def run() -> None:
                         extra_http_headers={"Referer": "https://www.linkedin.com/feed/"},
                     )
                     page = ctx.new_page()
+                    # apply stealth to each page if available
+                    if STEALTH_AVAILABLE:
+                        try:
+                            stealth_sync(page)
+                        except Exception as e:
+                            print("[WARN] stealth_sync on profile page failed:", e)
+
                     print(f"\n[{processed_count+1}] {link} — sender: {acting.get('name','(no name)')}")
                     try:
                         handle_profile(page, link, acting)

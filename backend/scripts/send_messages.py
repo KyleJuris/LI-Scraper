@@ -5,6 +5,18 @@ import requests
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
+# Attempt to import stealth helper (several package layouts exist)
+STEALTH_AVAILABLE = False
+try:
+    from playwright_stealth import stealth_sync
+    STEALTH_AVAILABLE = True
+except Exception:
+    try:
+        from playwright_stealth.sync import stealth_sync
+        STEALTH_AVAILABLE = True
+    except Exception:
+        STEALTH_AVAILABLE = False
+
 load_dotenv()
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -134,6 +146,13 @@ def mark_messaged(profile_url: str, dm_text: str) -> None:
         print("[DB] mark_messaged failed:", r.status_code, r.text)
 
 def send_message_to_profile(page, profile_url: str, msg_text: str) -> bool:
+    # attempt to apply stealth on the page (harmless if not available)
+    if STEALTH_AVAILABLE:
+        try:
+            stealth_sync(page)
+        except Exception as e:
+            print("[WARN] stealth_sync failed on message page:", e)
+
     try:
         page.goto(profile_url, wait_until="domcontentloaded")
     except Exception as e:
@@ -183,6 +202,11 @@ def send_message_to_profile(page, profile_url: str, msg_text: str) -> bool:
 
 def _verify_login(ctx) -> bool:
     p = ctx.new_page()
+    if STEALTH_AVAILABLE:
+        try:
+            stealth_sync(p)
+        except Exception as e:
+            print("[WARN] stealth_sync failed on verify page:", e)
     p.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
     jitter_sleep(1.0, 1.5)
     ok = ("login" not in p.url.lower()) and ("challenge" not in p.url.lower())
@@ -245,6 +269,13 @@ def run() -> None:
                 dm_text = personalize(row.get("dm_text"), first_name)
 
                 page = ctx.new_page()
+                # apply stealth on each new page (if available)
+                if STEALTH_AVAILABLE:
+                    try:
+                        stealth_sync(page)
+                    except Exception as e:
+                        print("[WARN] stealth_sync failed on new page:", e)
+
                 print(f"  [{i}/{len(rows)}] DM → {url}")
                 ok = send_message_to_profile(page, url, dm_text)
                 if ok:
