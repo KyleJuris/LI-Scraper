@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -97,11 +97,23 @@ export default function ListsPage() {
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const processingListIdsRef = useRef<Set<string>>(new Set())
 
+  // Memoize processing list IDs to prevent unnecessary re-runs
+  const processingListIdsStr = useMemo(() => {
+    return lists
+      .filter((list) => isListProcessing(list))
+      .map((l) => l.id)
+      .sort()
+      .join(',')
+  }, [lists.map(l => `${l.id}-${l.profile_count}-${l.created_at}`).join(',')])
+  
+  const processingListIds = useMemo(() => {
+    return new Set(processingListIdsStr ? processingListIdsStr.split(',') : [])
+  }, [processingListIdsStr])
+
   // Poll for list updates when there are processing lists
   useEffect(() => {
     // Check if there are any processing lists
-    const processingLists = lists.filter((list) => isListProcessing(list))
-    const currentProcessingIds = new Set(processingLists.map((l) => l.id))
+    const currentProcessingIds = processingListIds
     
     // Only restart polling if the set of processing list IDs has changed
     const idsChanged = 
@@ -175,8 +187,8 @@ export default function ListsPage() {
         }
       }
 
-      // Start polling every 10 seconds (less frequent)
-      pollIntervalRef.current = setInterval(poll, 10000)
+      // Start polling every 30 seconds
+      pollIntervalRef.current = setInterval(poll, 30000)
       
       // Also poll immediately to check current status
       poll()
@@ -188,7 +200,7 @@ export default function ListsPage() {
         pollIntervalRef.current = null
       }
     }
-  }, [lists.map(l => `${l.id}-${l.profile_count}-${l.created_at}`).join(',')]) // Only re-run when list state actually changes
+  }, [processingListIds]) // Only re-run when processing list IDs actually change
 
   const fetchLists = async () => {
     setIsLoadingLists(true)

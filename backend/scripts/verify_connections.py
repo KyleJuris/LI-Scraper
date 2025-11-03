@@ -139,7 +139,19 @@ def run() -> None:
             if not rows:
                 continue
 
-            browser = p.chromium.launch(headless=HEADLESS)
+            # Chrome flags needed for containerized environments (Render, Docker, etc.)
+            chrome_args = []
+            if HEADLESS:
+                chrome_args = [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--disable-gpu',
+                ]
+            browser = p.chromium.launch(headless=HEADLESS, args=chrome_args)
             ctx = browser.new_context(
                 storage_state=state,
                 user_agent=ua if ua else None,

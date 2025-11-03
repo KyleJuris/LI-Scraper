@@ -425,7 +425,19 @@ def run() -> None:
     first = senders[0]; st = first.get("storage_state"); ua = first.get("user_agent")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=HEADLESS)
+        # Chrome flags needed for containerized environments (Render, Docker, etc.)
+        chrome_args = []
+        if HEADLESS:
+            chrome_args = [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu',
+            ]
+        browser = p.chromium.launch(headless=HEADLESS, args=chrome_args)
         base = browser.new_context(
             storage_state=st if isinstance(st, dict) else None,
             user_agent=ua if ua else None,

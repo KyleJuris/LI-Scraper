@@ -762,23 +762,50 @@ def lists_populate(
         
         # Start the script as a subprocess (not a thread, because Playwright needs an event loop)
         # Playwright cannot run in regular threads due to asyncio requirements
-        process = subprocess.Popen(
-            [sys.executable, str(script_path)],
-            cwd=str(Path(__file__).parent.parent),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1
-        )
+        logger.info(f"About to start subprocess: {sys.executable} {script_path}")
+        logger.info(f"Working directory: {Path(__file__).parent.parent}")
         
-        logger.info(f"✓ Subprocess started successfully! PID: {process.pid}, list_id: {list_id}")
-        logger.info(f"  Script path: {script_path}")
+        try:
+            process = subprocess.Popen(
+                [sys.executable, str(script_path)],
+                cwd=str(Path(__file__).parent.parent),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Combine stderr with stdout
+                text=True,
+                bufsize=1,
+                env=os.environ.copy()  # Pass all environment variables
+            )
+            
+            logger.info(f"✓ Subprocess started successfully! PID: {process.pid}, list_id: {list_id}")
+            logger.info(f"  Script path: {script_path}")
+            logger.info(f"  Headless mode: {os.getenv('HEADLESS', 'false')}")
+            
+        except Exception as e:
+            logger.error(f"❌ FAILED to start subprocess: {str(e)}")
+            logger.error(traceback.format_exc())
+            raise Exception(f"Failed to start script subprocess: {str(e)}")
         
         # Start a background thread to monitor the process and update count when done
         def monitor_process():
             try:
+                # Read output in real-time and log it
+                if process.stdout:
+                    for line in iter(process.stdout.readline, ''):
+                        if line:
+                            logger.info(f"[Subprocess {process.pid}] {line.rstrip()}")
+                
                 process.wait()  # Wait for process to complete
                 logger.info(f"Subprocess {process.pid} completed with return code: {process.returncode}")
+                
+                # Log any remaining output
+                if process.stdout:
+                    remaining = process.stdout.read()
+                    if remaining:
+                        logger.info(f"[Subprocess {process.pid} final output] {remaining}")
+                
+                if process.returncode != 0:
+                    logger.error(f"Subprocess {process.pid} exited with error code: {process.returncode}")
+                
                 if list_id:
                     _update_list_count_after_script(list_id)
                     # Update list timestamp
@@ -788,6 +815,7 @@ def lists_populate(
                     logger.info(f"Updated list {list_id} after script completion")
             except Exception as e:
                 logger.error(f"Error monitoring subprocess: {str(e)}")
+                logger.error(traceback.format_exc())
                 # Update timestamp even on error
                 try:
                     if list_id:
@@ -797,7 +825,9 @@ def lists_populate(
                 except:
                     pass
         
-        monitor_thread = Thread(target=monitor_process, daemon=True)
+        # Use non-daemon thread so it doesn't get killed when main process is idle
+        # This is critical for cloud platforms like Render that may kill daemon threads
+        monitor_thread = Thread(target=monitor_process, daemon=False)
         monitor_thread.start()
         
         # Return success immediately with list_id
